@@ -1,0 +1,19 @@
+# Environment Variables & Secrets
+.env
+*.env
+!.env.example
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Logs & Temporary Files
+*.log
+.DS_Store

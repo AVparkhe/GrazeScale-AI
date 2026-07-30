@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cattle Recognition System</title>
+    <style>
+      /* 1. Video container fixed to cover the entire viewport */
+      #video-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        min-width: 100%;
+        min-height: 100%;
+        width: auto;
+        height: auto;
+        z-index: -100; /* Puts the video behind all other content */
+        overflow: hidden;
+      }
+      /* 2. Remove the overlay entirely */
+      #video-overlay {
+        display: none;
+      }
+      /* 3. SET ROOT TO FULLY TRANSPARENT */
+      #root {
+        position: relative; 
+        z-index: 1;
+        min-height: 100vh;
+        /* THIS IS THE KEY: Ensure the main app wrapper is transparent */
+        background-color: transparent; 
+      }
+    </style>
+  </head>
+  <body>
+    <div id="video-background">
+      <video autoplay muted loop playsinline id="bg-video" class="object-cover w-full h-full">
+        <source src="/cattle-video.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+    </div>
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+# Environment Variables & Sensitive Config
+.env
+*.env
+.env.*
+!.env.example
+*.local
+
+# Node / Frontend Dependencies
+node_modules/
+build/
+dist/
+.next/
+out/
+.vercel/
+
+# Python / Backend Dependencies & Venvs
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# IDE & OS Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+*.log
