@@ -1,7 +1,10 @@
 import React, { useState } from "react";
 import axios from "axios";
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname.includes('onrender.com') || window.location.hostname.includes('vercel.app'))
+    ? 'https://grazescale-ai.onrender.com' 
+    : 'http://localhost:8000');
 
 const UploadForm = () => {
   const [file, setFile] = useState(null);

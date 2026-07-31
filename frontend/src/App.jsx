@@ -6,7 +6,10 @@ import {
 import UploadForm from "./components/UploadForm";
 import GrazeScaleDashboard from "./components/GrazeScaleDashboard";
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname.includes('onrender.com') || window.location.hostname.includes('vercel.app'))
+    ? 'https://grazescale-ai.onrender.com' 
+    : 'http://localhost:8000');
 
 // Helper function to render decision badges with light, decent colors
 const getDecisionBadge = (decision) => {
