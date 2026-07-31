@@ -1,17 +1,12 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import torch
-import torch.nn as nn
-import torchvision.transforms as transforms
-from torchvision import models
 import cv2
 import numpy as np
 from PIL import Image
 import pickle
 import io
 import base64
-from sklearn.metrics.pairwise import cosine_similarity
 from pathlib import Path
 import logging
 from typing import List, Dict, Any
@@ -22,6 +17,7 @@ from psycopg2.extras import RealDictCursor
 import os
 import random
 from dotenv import load_dotenv
+import onnxruntime as ort
 
 # Load environment variables
 load_dotenv()
@@ -33,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="GrazeScale AI - Muzzle Recognition API",
-    description="Production API for livestock identification using muzzle biometrics by AVparkhe",
+    description="Production API for livestock identification using muzzle biometrics by AVparkhe (ONNX Runtime)",
     version="2.0.0"
 )
 
@@ -62,6 +58,7 @@ DB_CONFIG = {
 # Global variables
 recognizer = None
 MODEL_PATH = os.getenv("MODEL_PATH", "muzzle_recognition_model.pkl")
+ONNX_MODEL_PATH = os.getenv("ONNX_MODEL_PATH", os.path.join(os.path.dirname(__file__), "resnet50_features.onnx"))
 
 def get_db_connection():
     """Get PostgreSQL database connection (supports Render DATABASE_URL or discrete config)"""
@@ -73,7 +70,6 @@ def get_db_connection():
         return conn
     except Exception as e:
         logger.error(f"Database connection error: {e}")
-        # Raising an HTTP exception here is better for immediate client feedback
         raise HTTPException(status_code=500, detail="Database connection failed")
 
 def generate_cattle_id():
@@ -98,46 +94,56 @@ def get_unique_cattle_id() -> str:
         if not is_cattle_id_exists(cattle_id):
             return cattle_id
 
-class MuzzleFeatureExtractor(nn.Module):
-    """Feature extractor class"""
-    def __init__(self, model_name='resnet50', feature_dim=2048):
-        super(MuzzleFeatureExtractor, self).__init__()
+def calc_cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+    """Calculate cosine similarity between two 1D feature vectors using pure NumPy"""
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return float(np.dot(vec1, vec2) / (norm1 * norm2))
+
+def preprocess_image_for_onnx(image: Image.Image) -> np.ndarray:
+    """Preprocess PIL Image to (1, 3, 224, 224) float32 numpy array with ImageNet normalization"""
+    img = image.convert('RGB').resize((224, 224))
+    img_np = np.array(img, dtype=np.float32) / 255.0
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    img_np = (img_np - mean) / std
+    img_np = img_np.transpose(2, 0, 1)  # Convert HWC to CHW
+    return np.expand_dims(img_np, axis=0) # Add batch dim: (1, 3, 224, 224)
+
+class ONNXFeatureExtractor:
+    """Lightweight feature extractor using ONNX Runtime (low memory footprint)"""
+    def __init__(self, model_path: str = ONNX_MODEL_PATH):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"ONNX model file not found at {model_path}")
         
-        if model_name == 'resnet50':
-            self.backbone = models.resnet50(pretrained=True)
-            self.backbone = nn.Sequential(*list(self.backbone.children())[:-1])
-            self.feature_dim = 2048
-            
-        for param in self.backbone.parameters():
-            param.requires_grad = False
-        self.backbone.eval()
-    
-    def forward(self, x):
-        with torch.no_grad():
-            features = self.backbone(x)
-            if features.dim() > 2:
-                features = features.view(features.size(0), -1)
-            return features
+        # Configure ONNX Runtime for low-memory single-thread CPU execution
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = 1
+        opts.inter_op_num_threads = 1
+        opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        
+        self.session = ort.InferenceSession(model_path, opts, providers=['CPUExecutionProvider'])
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+        logger.info(f"ONNX Feature Extractor initialized successfully with model: {model_path}")
+
+    def extract_features(self, image: Image.Image) -> np.ndarray:
+        tensor = preprocess_image_for_onnx(image)
+        outputs = self.session.run([self.output_name], {self.input_name: tensor})
+        return outputs[0].flatten()
 
 class CattleRecognitionAPI:
-    """Main recognition class for API"""
-    def __init__(self, model_path: str = MODEL_PATH):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    """Main recognition class for API using ONNX Runtime"""
+    def __init__(self, model_path: str = MODEL_PATH, onnx_path: str = ONNX_MODEL_PATH):
         self.model_path = model_path
         self.animal_database = {}
         
-        # Image preprocessing
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                 std=[0.229, 0.224, 0.225])
-        ])
+        # Initialize ONNX feature extractor
+        self.feature_extractor = ONNXFeatureExtractor(onnx_path)
         
-        # Initialize feature extractor
-        self.feature_extractor = MuzzleFeatureExtractor('resnet50').to(self.device)
-        
-        # Load model if exists
+        # Load legacy model structure if exists
         if os.path.exists(model_path):
             self.load_model(model_path)
         
@@ -222,24 +228,18 @@ class CattleRecognitionAPI:
             logger.error(f"Error loading existing cattle: {e}")
     
     def load_model(self, model_path: str):
-        """Load trained model"""
+        """Load trained model structure"""
         try:
             with open(model_path, 'rb') as f:
                 save_data = pickle.load(f)
-            logger.info(f"Model structure loaded successfully.")
+            logger.info("Model structure loaded successfully.")
         except Exception as e:
             logger.error(f"Error loading model: {e}")
     
     def extract_features_from_image(self, image: Image.Image):
-        """Extract features from PIL Image"""
+        """Extract features from PIL Image using ONNX"""
         try:
-            image = image.convert('RGB')
-            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
-            
-            with torch.no_grad():
-                features = self.feature_extractor(image_tensor)
-            
-            return features.cpu().numpy().flatten()
+            return self.feature_extractor.extract_features(image)
         except Exception as e:
             logger.error(f"Error extracting features: {e}")
             return None
@@ -306,7 +306,7 @@ class CattleRecognitionAPI:
             return {"success": False, "error": str(e)}
     
     def identify_cattle(self, image: Image.Image, confidence_threshold: float = 0.85) -> Dict:
-        """Identify cattle from image with smart analysis"""
+        """Identify cattle from image using ONNX runtime features"""
         try:
             # Extract features
             query_features = self.extract_features_from_image(image)
@@ -316,14 +316,14 @@ class CattleRecognitionAPI:
             if not self.animal_database:
                 return {"success": False, "error": "No cattle registered in database"}
             
-            # Compare with database
+            # Compare with database using pure NumPy cosine similarity
             similarities = {}
             for cattle_id, data in self.animal_database.items():
                 if 'avg_features' in data:
-                    similarity = cosine_similarity(
-                        query_features.reshape(1, -1),
-                        data['avg_features'].reshape(1, -1)
-                    )[0, 0]
+                    similarity = calc_cosine_similarity(
+                        query_features,
+                        data['avg_features']
+                    )
                     similarities[cattle_id] = similarity
             
             # Sort by similarity
@@ -393,7 +393,6 @@ class CattleRecognitionAPI:
             
             if result:
                 cattle_info = dict(result)
-                # Convert datetime to string
                 if cattle_info.get('registration_date'):
                     cattle_info['registration_date'] = cattle_info['registration_date'].isoformat()
                 return {"success": True, "cattle_info": cattle_info}
@@ -409,13 +408,13 @@ class CattleRecognitionAPI:
 async def startup_event():
     global recognizer
     recognizer = CattleRecognitionAPI()
-    logger.info("Cattle Recognition API started successfully")
+    logger.info("Cattle Recognition API started successfully (ONNX mode)")
 
 # API Endpoints
 # -------------------------------------------------------------------------
 @app.get("/")
 async def root():
-    return {"message": "Cattle Muzzle Recognition API", "status": "active"}
+    return {"message": "Cattle Muzzle Recognition API", "status": "active", "engine": "ONNX Runtime"}
 
 @app.get("/health")
 async def health_check():
@@ -424,7 +423,8 @@ async def health_check():
         "status": "healthy",
         "registered_cattle": cattle_count,
         "model_loaded": recognizer is not None,
-        "database": "PostgreSQL"
+        "database": "PostgreSQL",
+        "engine": "ONNX Runtime"
     }
 
 @app.post("/register")
@@ -433,7 +433,6 @@ async def register_cattle(
     owner_contact: str = Form(...),
     breed: str = Form(...),
     age: int = Form(...),
-    # FIX: Corrected parameter name to match frontend's 'muzzle_image'
     muzzle_image: UploadFile = File(...) 
 ):
     """Register new cattle with muzzle image"""
@@ -442,11 +441,9 @@ async def register_cattle(
         raise HTTPException(status_code=400, detail="File must be an image")
 
     try:
-        # Read and process image using the corrected variable name
         image_data = await muzzle_image.read()
         image = Image.open(io.BytesIO(image_data))
         
-        # Prepare cattle data
         cattle_data = {
             "owner_name": owner_name,
             "owner_contact": owner_contact,
@@ -454,7 +451,6 @@ async def register_cattle(
             "age": age,
         }
         
-        # Register cattle
         result = recognizer.register_cattle(cattle_data, image)
         
         if result.get("success"):
@@ -468,7 +464,6 @@ async def register_cattle(
 
 @app.post("/verify")
 async def verify_cattle(
-    # FIX: Corrected parameter name to match frontend's 'muzzle_image'
     muzzle_image: UploadFile = File(...)
 ):
     """Verify/identify cattle from muzzle image"""
@@ -477,14 +472,11 @@ async def verify_cattle(
         raise HTTPException(status_code=400, detail="File must be an image")
     
     try:
-        # Read and process image using the corrected variable name
         image_data = await muzzle_image.read()
         image = Image.open(io.BytesIO(image_data))
         
-        # Identify cattle
         result = recognizer.identify_cattle(image)
 
-        # Convert NumPy floats to Python floats
         if 'confidence' in result:
             result['confidence'] = float(result['confidence'])
         if 'similarity_gap' in result:
@@ -496,13 +488,11 @@ async def verify_cattle(
                 if 'confidence' in r:
                     r['confidence'] = float(r['confidence'])
 
-        # If match found, get detailed cattle info
         if result.get('success', False) and result.get('decision') in ['MATCH_CONFIDENT', 'MATCH_UNCERTAIN']:
             cattle_info = recognizer.get_cattle_info(result['top_match'])
             if cattle_info.get('success'):
-                result['matched_cattle'] = cattle_info['cattle_info'] # NOTE: Changed key to 'matched_cattle' for frontend compatibility
+                result['matched_cattle'] = cattle_info['cattle_info']
 
-        # Log verification attempt
         if result.get('success', False):
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -526,7 +516,7 @@ async def verify_cattle(
         return JSONResponse(content={
             "is_matched": result.get('decision', 'NEW_UNIQUE') in ['MATCH_CONFIDENT', 'MATCH_UNCERTAIN'],
             "confidence": result.get('confidence', 0.0),
-            "matched_cattle": result.get('matched_cattle', None) # Return object expected by frontend
+            "matched_cattle": result.get('matched_cattle', None)
         })
         
     except Exception as e:
@@ -563,18 +553,17 @@ async def list_all_cattle():
         cattle_list = []
         for row in results:
             cattle_dict = dict(row)
-            # Convert datetime to string
             if cattle_dict.get('registration_date'):
                 cattle_dict['registration_date'] = cattle_dict['registration_date'].isoformat()
             cattle_list.append(cattle_dict)
         
-        return JSONResponse(content=cattle_list) # Return array directly for frontend ease
+        return JSONResponse(content=cattle_list)
         
     except Exception as e:
         logger.error(f"Error listing cattle: {e}")
         return JSONResponse(content=[], status_code=500)
 
-@app.get("/logs") # NOTE: Changed from /verification-logs to /logs to match App.jsx
+@app.get("/logs")
 async def get_verification_logs(limit: int = 50):
     """Get recent verification logs"""
     try:
@@ -595,7 +584,6 @@ async def get_verification_logs(limit: int = 50):
         logs = []
         for row in results:
             log_dict = dict(row)
-            # Convert datetime to string
             if log_dict.get('verification_date'):
                 log_dict['verification_date'] = log_dict['verification_date'].isoformat()
             logs.append(log_dict)
