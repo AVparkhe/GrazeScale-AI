@@ -287,12 +287,21 @@ const CattleRecognitionSystem = () => {
                   Cattle Muzzle <span className="text-sky-600">Recognition</span>
                 </h1>
                 
-                <button 
-                  onClick={() => setActiveTab('register')}
-                  className="inline-flex items-center px-6 py-3.5 border border-transparent text-base font-bold rounded-xl shadow-xl text-white bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 disabled:opacity-50 transition-all transform hover:scale-[1.02]"
-                >
-                  Register New Cattle <Component className="w-5 h-5 ml-2" />
-                </button>
+                <div className="flex flex-wrap gap-4 pt-2">
+                  <button 
+                    onClick={() => setActiveTab('register')}
+                    className="inline-flex items-center px-6 py-3.5 border border-transparent text-base font-bold rounded-xl shadow-xl text-white bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 transition-all transform hover:scale-[1.02]"
+                  >
+                    Register New Cattle <FileText className="w-5 h-5 ml-2" />
+                  </button>
+                  
+                  <button 
+                    onClick={() => setActiveTab('grazescale')}
+                    className="inline-flex items-center px-6 py-3.5 border border-transparent text-base font-bold rounded-xl shadow-xl text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-all transform hover:scale-[1.02]"
+                  >
+                    AI Weight Estimation <Camera className="w-5 h-5 ml-2" />
+                  </button>
+                </div>
               </div>
               <div className="lg:w-1/2 mt-6 lg:mt-0 lg:pl-8">
                 <img 
