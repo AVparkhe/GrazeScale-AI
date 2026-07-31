@@ -1,6 +1,7 @@
-// src/components/UploadForm.js
 import React, { useState } from "react";
 import axios from "axios";
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const UploadForm = () => {
   const [file, setFile] = useState(null);
@@ -32,7 +33,7 @@ const UploadForm = () => {
       setResult(null);
 
       const res = await axios.post(
-        "https://grazescale-backendapi.onrender.com/api/analyze/",
+        `${API_URL}/api/analyze/`,
         formData,
         { headers: { "Content-Type": "multipart/form-data" } }
       );

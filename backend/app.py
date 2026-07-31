@@ -33,17 +33,26 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Add CORS middleware with dynamic environment support
-allowed_origins_str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
+# Add CORS middleware with dynamic environment support (defaults to allowing all origins '*')
+allowed_origins_str = os.getenv("CORS_ALLOWED_ORIGINS", "*")
 allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-)
+if "*" in allowed_origins or "all" in allowed_origins or allowed_origins_str == "*":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # PostgreSQL Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
