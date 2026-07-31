@@ -5,6 +5,7 @@
   "author": "AVparkhe",
   "description": "Frontend web application for GrazeScale AI - Livestock Biometrics and Productivity Management",
   "dependencies": {
+    "axios": "^1.7.9",
     "framer-motion": "^11.0.8",
     "lucide-react": "^0.545.0",
     "react": "^18.2.0",
