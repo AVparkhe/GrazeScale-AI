@@ -164,40 +164,43 @@ class CattleRecognitionAPI:
     
     def init_database(self):
         """Initialize PostgreSQL database tables"""
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS cattle (
-                id SERIAL PRIMARY KEY,
-                cattle_id VARCHAR(12) UNIQUE NOT NULL,
-                owner_name VARCHAR(255),
-                owner_contact VARCHAR(50),
-                registration_date TIMESTAMP,
-                breed VARCHAR(100),
-                age INTEGER,
-                features BYTEA,
-                image_count INTEGER DEFAULT 0,
-                status VARCHAR(20) DEFAULT 'active'
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS verification_logs (
-                id SERIAL PRIMARY KEY,
-                query_cattle_id VARCHAR(12),
-                matched_cattle_id VARCHAR(12),
-                confidence REAL,
-                verification_date TIMESTAMP,
-                decision VARCHAR(50),
-                image_data BYTEA
-            )
-        ''')
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        logger.info("Database tables initialized successfully")
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS cattle (
+                    id SERIAL PRIMARY KEY,
+                    cattle_id VARCHAR(12) UNIQUE NOT NULL,
+                    owner_name VARCHAR(255),
+                    owner_contact VARCHAR(50),
+                    registration_date TIMESTAMP,
+                    breed VARCHAR(100),
+                    age INTEGER,
+                    features BYTEA,
+                    image_count INTEGER DEFAULT 0,
+                    status VARCHAR(20) DEFAULT 'active'
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS verification_logs (
+                    id SERIAL PRIMARY KEY,
+                    query_cattle_id VARCHAR(12),
+                    matched_cattle_id VARCHAR(12),
+                    confidence REAL,
+                    verification_date TIMESTAMP,
+                    decision VARCHAR(50),
+                    image_data BYTEA
+                )
+            ''')
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            logger.info("Database tables initialized successfully")
+        except Exception as e:
+            logger.error(f"Database initialization error (handled gracefully): {e}")
     
     def load_existing_cattle(self):
         """Load existing cattle from database into memory"""
